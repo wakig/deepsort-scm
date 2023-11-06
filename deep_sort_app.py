@@ -13,6 +13,9 @@ from deep_sort import nn_matching
 from deep_sort.detection import Detection
 from deep_sort.tracker import Tracker
 
+tot_same_kf_pf = 0
+tot_diff_kf_pf = 0
+
 
 def gather_sequence_info(sequence_dir, detection_file):
     """Gather sequence information, such as image filenames, detections,
@@ -129,6 +132,8 @@ def create_detections(detection_mat, frame_idx, min_height=0):
 def run(sequence_dir, detection_file, output_file, min_confidence,
         nms_max_overlap, min_detection_height, max_cosine_distance,
         nn_budget, display, lam, method, gating_dim):
+    global tot_same_kf_pf
+    global tot_diff_kf_pf
     """Run multi-target tracker on a particular sequence.
 
     Parameters
@@ -166,6 +171,11 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
     def frame_callback(vis, frame_idx):
         print("Processing frame %05d" % frame_idx)
 
+        if display or not display:
+            image = cv2.imread(
+                    seq_info["image_filenames"][frame_idx], cv2.IMREAD_COLOR)
+            tracker.update_image(image)
+
         # Load image and generate detections.
         detections = create_detections(
             seq_info["detections"], frame_idx, min_detection_height)
@@ -184,8 +194,6 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
 
         # Update visualization.
         if display:
-            image = cv2.imread(
-                seq_info["image_filenames"][frame_idx], cv2.IMREAD_COLOR)
             vis.set_image(image.copy())
             vis.draw_detections(detections)
             vis.draw_trackers(tracker.tracks)
@@ -208,6 +216,13 @@ def run(sequence_dir, detection_file, output_file, min_confidence,
     else:
         visualizer = visualization.NoVisualization(seq_info)
     visualizer.run(frame_callback)
+
+    print('Instances with similar KF and PF positions:', tracker.cnt_same_kf_pf)
+    print('Instances with different KF and PF positions:', tracker.cnt_diff_kf_pf)
+    tot_same_kf_pf += tracker.cnt_same_kf_pf
+    tot_diff_kf_pf += tracker.cnt_diff_kf_pf
+    print('Total instances with similar KF and PF positions:', tot_same_kf_pf)
+    print('Total instances with different KF and PF positions:', tot_diff_kf_pf)
 
     # Store results.
     f = open(output_file, 'w')
@@ -274,3 +289,5 @@ if __name__ == "__main__":
         args.sequence_dir, args.detection_file, args.output_file,
         args.min_confidence, args.nms_max_overlap, args.min_detection_height,
         args.max_cosine_distance, args.nn_budget, args.display, args.lam, args.method, args.gating_dim)
+    print('Total instances with similar KF and PF positions:', tot_same_kf_pf)
+    print('Total instances with different KF and PF positions:', tot_diff_kf_pf)

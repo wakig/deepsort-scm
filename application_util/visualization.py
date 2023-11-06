@@ -120,20 +120,32 @@ class Visualization(object):
         self.viewer.thickness = 2
         self.viewer.color = 0, 0, 255
         for i, detection in enumerate(detections):
-            self.viewer.rectangle(*detection.tlwh)
+            pass
+            # self.viewer.rectangle(*detection.tlwh)
 
     def draw_trackers(self, tracks):
         self.viewer.thickness = 2
         for track in tracks:
-            if not track.is_confirmed():# or track.time_since_update > 0:
+            # for pt in track.particles:
+            #     # print(pt)
+            #     self.viewer.circle(pt[0],pt[1],1)
+            # if not track.is_confirmed() or track.time_since_update > 0:
+            #     continue
+            if track.time_since_update > 10:
                 continue
             self.viewer.color = create_unique_color_uchar(track.track_id)
             for pt in track.history:
                 #self.viewer.circle(pt[0]+pt[2]/2,pt[1]+pt[3]/2,1)
                 self.viewer.circle(pt[0],pt[1],1)
+            for pt in track.particles:
+                # print(pt)
+                self.viewer.circle(pt[0],pt[1],1)
+            x = np.mean(track.particles[:,0])
+            y = np.mean(track.particles[:,1])
+            self.viewer.circle(x,y,10)
             if track.time_since_update > 0:
-                self.viewer.drawrect(
-                    *track.to_tlwh().astype(int), label=str(track.track_id))
+                # self.viewer.drawrect(
+                #     *track.to_tlwh().astype(int), label=str(track.track_id))
                 continue
             self.viewer.rectangle(
                 *track.to_tlwh().astype(int), label=str(track.track_id))
@@ -141,10 +153,15 @@ class Visualization(object):
             #                      label="%d" % track.track_id)
 
             # FOR TRAJECTORIES
-            # self.viewer.circle(track.mean[0] + track.mean[4], track.mean[1] + track.mean[5], 10)
-            diff = math.sqrt(track.mean[4]**2 + track.mean[5]**2)
-            goal = 100 / diff
-            start_point = (int(track.mean[0]), int(track.mean[1]))
-            end_point = (int(track.mean[0] + track.mean[4]*goal), int(track.mean[1] + track.mean[5]*goal))
-            self.viewer.arrowed_line(start_point, end_point, self.viewer.color, 6)
+            # diff = math.sqrt(track.mean[4]**2 + track.mean[5]**2)
+            # goal = 100 / diff
+            # start_point = (int(track.mean[0]), int(track.mean[1]))
+            # end_point = (int(track.mean[0] + track.mean[4]*goal), int(track.mean[1] + track.mean[5]*goal))
+            # self.viewer.arrowed_line(start_point, end_point, self.viewer.color, 6)
 #
+    # def draw_particles(self, tracks):
+    #     self.viewer.thickness = 2
+    #     for track in tracks:
+    #         if not track.is_confirmed():
+    #             continue
+    #         self.viewer.color = create_unique_color_uchar(track.track_id)

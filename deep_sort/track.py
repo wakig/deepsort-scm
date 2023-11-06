@@ -1,3 +1,5 @@
+import numpy as np
+
 # vim: expandtab:ts=4:sw=4
 
 class TrackState:
@@ -63,7 +65,7 @@ class Track:
     """
 
     def __init__(self, mean, covariance, track_id, n_init, max_age,
-                 feature=None):
+                 feature=None, method='baseline'):
         self.mean = mean
         self.covariance = covariance
         self.track_id = track_id
@@ -79,6 +81,12 @@ class Track:
         self._n_init = n_init
         self._max_age = max_age
         self.history = []
+        self.particles = np.array(0)
+        self.pmean = []
+        self.method = method
+
+    def initialize_particles(self, pf):
+        self.particles = pf.initialize_particles(self.to_tlwh())
 
     def to_tlwh(self):
         """Get current position in bounding box format `(top left x, top left y,
@@ -96,7 +104,7 @@ class Track:
         return ret
 
     def to_tlbr(self):
-        """Get current position in bounding box format `(min x, miny, max x,
+        """Get current position in bounding box format `(min x, min y, max x,
         max y)`.
 
         Returns
@@ -108,6 +116,18 @@ class Track:
         ret = self.to_tlwh()
         ret[2:] = ret[:2] + ret[2:]
         return ret
+
+    def get_midpoint(self):
+        """Get midpoint of bounding box in format `(x, y)`.
+
+        Returns
+        -------
+        ndarray
+            The bounding box.
+
+        """
+        ret = self.to_tlbr()
+        return np.array([int((ret[0]+ret[2])/2), int((ret[1]+ret[3])/2)])
 
     def predict(self, kf):
         """Propagate the state distribution to the current time step using a
@@ -123,8 +143,15 @@ class Track:
         self.age += 1
         self.time_since_update += 1
 
-    def predict_pf(self, pf):
+    def predict_pf(self, pf, kf):
+        # print(self.particles)
+        # self.mean, self.covariance = kf.predict(self.mean, self.covariance)
         self.particles = pf.apply_velocity(self.particles)
+        self.particles = pf.apply_noise(self.particles)
+        # x = np.mean(self.particles[:,0])
+        # y = np.mean(self.particles[:,1])
+        # self.mean[0] = x
+        # self.mean[1] = y
         self.age += 1
         self.time_since_update += 1
 
@@ -142,6 +169,8 @@ class Track:
         """
         self.mean, self.covariance = kf.update(
             self.mean, self.covariance, detection.to_xyah())
+        # print(self.covariance)
+        
         self.features.append(detection.feature)
 
         self.hits += 1
@@ -155,20 +184,42 @@ class Track:
             
             #self.history.append(self.to_tlwh())
     
-    def update_pf(self, pf, detections):
-        pass
+    def update_pf(self, pf, detection, kf):
+        self.mean, self.covariance = kf.update(
+            self.mean, self.covariance, detection.to_xyah())
+        # print(self.covariance)
+        errors = pf.compute_errors(self.particles, detection.to_tlbr())
+        weights = pf.compute_weights(self.particles, errors)
+        self.particles, self.pmean = pf.resample(self.particles, weights)
+        # self.particles = pf.apply_noise(self.particles)
+        det_xyah = detection.to_xyah()
+        # self.mean[0] = det_xyah[0]
+        # self.mean[1] = det_xyah[1]
+        self.mean[2] = det_xyah[2]
+        self.mean[3] = det_xyah[3]
+        self.mean[0] = self.pmean[0]
+        self.mean[1] = self.pmean[1]
+
+        self.features.append(detection.feature)
+        self.hits += 1
+        self.time_since_update = 0
+        if self.state == TrackState.Tentative and self.hits >= self._n_init:
+            self.state = TrackState.Confirmed
 
     def mark_missed(self):
         """Mark this track as missed (no association at the current time step).
         """
         if self.state == TrackState.Tentative:
             self.state = TrackState.Deleted
+            self.particles = []
         elif self.time_since_update > self._max_age:
             self.state = TrackState.Deleted
+            self.particles = []
 
     def mark_hidden(self):
-        if self.time_since_update > 300: # (Arbitrary) lifespan of the occluded box
+        if self.time_since_update > 30: # (Arbitrary) lifespan of the occluded box
             self.state = TrackState.Deleted
+            self.particles = []
 
     def is_tentative(self):
         """Returns True if this track is tentative (unconfirmed).

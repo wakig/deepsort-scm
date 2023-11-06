@@ -69,7 +69,7 @@ class Tracker:
 
     """
 
-    def __init__(self, metric, max_iou_distance=0.7, max_age=300, n_init=3, lam=0.0, method='baseline', gating_dim=4): # max_age also affects prop algo!!!
+    def __init__(self, metric, max_iou_distance=0.7, max_age=30, n_init=3, lam=0.0, method='baseline', gating_dim=4): # max_age also affects prop algo!!!
         self.metric = metric
         self.max_iou_distance = max_iou_distance
         self.max_age = max_age
@@ -82,19 +82,26 @@ class Tracker:
         self.method = method
         self.gating_dim = gating_dim
 
-        self.particle_filter = particle_filter.ParticleFilter()
+        self.pf = particle_filter.ParticleFilter()
+        self.image = None
+        
+        self.cnt_same_kf_pf = 0
+        self.cnt_diff_kf_pf = 0
 
     def predict(self):
         """Propagate track state distributions one time step forward.
 
         This function should be called once every time step, before `update`.
         """
+        # print(len(self.tracks))
+        # for track in self.tracks:
+        #     print(track.particles)
         if self.method != 'pf':
             for track in self.tracks:
                 track.predict(self.kf)
         else:
             for track in self.tracks:
-                track.predict_pf(self.pf)
+                track.predict_pf(self.pf, self.kf)
 
     def update(self, detections):
         """Perform measurement update and track management.
@@ -117,7 +124,7 @@ class Tracker:
         else:
             for track_idx, detection_idx in matches:
                 self.tracks[track_idx].update_pf(
-                    self.pf, detections[detection_idx])
+                    self.pf, detections[detection_idx], self.kf)
 
         # KALMAN FILTER
         if self.method == 'baseline':
@@ -172,6 +179,29 @@ class Tracker:
         self.metric.partial_fit(
             np.asarray(features), np.asarray(targets), active_targets)
 
+        # Check if particle mean is in track bbox
+        if self.method == 'pf':
+            for track in self.tracks:
+                if track.time_since_update > 0 or not track.is_confirmed():
+                    continue
+                kf_box = track.to_tlbr()
+                min_x = kf_box[0]
+                min_y = kf_box[1]
+                max_x = kf_box[2]
+                max_y = kf_box[3]
+                # min_x = track.mean[0]
+                # max_x = min_x + track.mean[2] * track.mean[3]
+                # min_y = track.mean[1]
+                # max_y = min_y + track.mean[3]
+                pf_x = track.pmean[0]
+                pf_y = track.pmean[1]
+                # print(min_x, max_x, min_y, max_y, pf_x, pf_y)
+                if pf_x < min_x or pf_x > max_x or pf_y < min_y or pf_y > max_y:
+                    self.cnt_diff_kf_pf += 1
+                else:
+                    self.cnt_same_kf_pf += 1
+                    # print('ye')
+
     def _match(self, detections):
 
         def gated_metric(tracks, dets, track_indices, detection_indices):
@@ -219,8 +249,13 @@ class Tracker:
         mean, covariance = self.kf.initiate(detection.to_xyah())
         self.tracks.append(Track(
             mean, covariance, self._next_id, self.n_init, self.max_age,
-            detection.feature))
+            detection.feature, self.method))
+        self.tracks[-1].initialize_particles(self.pf)
         self._next_id += 1
 
     def dual_distance(self):
         pass
+
+    def update_image(self, image):
+        self.image = image
+        self.pf.update_image(image)
